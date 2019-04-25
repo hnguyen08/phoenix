@@ -275,7 +275,7 @@ public class MutableIndexReplicationIT extends BaseTest {
         return found;
     }
 
-    private boolean ensureNumberOfRows(HTable remoteTable, int numRows) throws IOException {
+    private boolean ensureNumberOfRows(Table remoteTable, int numRows) throws IOException {
         Scan scan = new Scan();
         scan.setRaw(true);
         ResultScanner scanner = remoteTable.getScanner(scan);
@@ -316,35 +316,33 @@ public class MutableIndexReplicationIT extends BaseTest {
         assertFalse(rs.next());
 
         // make sure the data tables are created on the remote cluster
-        HBaseAdmin admin = utility1.getHBaseAdmin();
-        HBaseAdmin admin2 = utility2.getHBaseAdmin();
+        Admin admin = utility1.getAdmin();
+        Admin admin2 = utility2.getAdmin();
 
         List<String> dataTables = new ArrayList<String>();
         dataTables.add(DATA_TABLE_FULL_NAME);
         // There is no separate index table
         //dataTables.add(INDEX_TABLE_FULL_NAME);
         for (String tableName : dataTables) {
-            HTableDescriptor desc = admin.getTableDescriptor(TableName.valueOf(tableName));
+            TableDescriptor desc = admin.getDescriptor(TableName.valueOf(tableName));
 
             //create it as-is on the remote cluster
             admin2.createTable(desc);
 
             LOG.info("Enabling replication on source table: "+tableName);
-            HColumnDescriptor[] cols = desc.getColumnFamilies();
+            ColumnFamilyDescriptor[] cols = desc.getColumnFamilies();
             assertEquals(2, cols.length);
             // add the replication scope to the first column family
             LOG.info("Enabling replication on CF: " + cols[0].getName());
-            HColumnDescriptor col = desc.removeFamily(cols[0].getName());
-            col.setScope(HConstants.REPLICATION_SCOPE_GLOBAL);
-            desc.addFamily(col);
+            ColumnFamilyDescriptor col = ColumnFamilyDescriptorBuilder.newBuilder(cols[0].getName()).setScope(HConstants.REPLICATION_SCOPE_GLOBAL).build();
+            desc=TableDescriptorBuilder.newBuilder(desc).removeColumnFamily(cols[0].getName()).addColumnFamily(col).build();
             // add the replication scope to the second column family
             LOG.info("Enabling replication on CF: " + cols[1].getName());
-            HColumnDescriptor col2 = desc.removeFamily(cols[1].getName());
-            col2.setScope(HConstants.REPLICATION_SCOPE_GLOBAL);
-            desc.addFamily(col2);
+            ColumnFamilyDescriptor col2 = ColumnFamilyDescriptorBuilder.newBuilder(cols[1].getName()).setScope(HConstants.REPLICATION_SCOPE_GLOBAL).build();
+            desc=TableDescriptorBuilder.newBuilder(desc).removeColumnFamily(cols[1].getName()).addColumnFamily(col2).build();
             //disable/modify/enable table so it has replication enabled
             admin.disableTable(desc.getTableName());
-            admin.modifyTable(tableName, desc);
+            admin.modifyTable(desc);
             admin.enableTable(desc.getTableName());
             LOG.info("Replication enabled on source table: "+tableName);
         }
@@ -368,8 +366,8 @@ public class MutableIndexReplicationIT extends BaseTest {
 
         // make sure there are 2 rows in the HTable (one for the data row, one for the index entry)
         TableName[] mainTables = admin.listTableNames(DATA_TABLE_FULL_NAME);
-        TableName[] indexTables = admin.listTableNames(INDEX_TABLE_FULL_NAME);
-        HTable mainTable = new HTable(utility1.getConfiguration(), mainTables[0]);
+        org.apache.hadoop.hbase.client.Connection hbaseConn = ConnectionFactory.createConnection(utility1.getConfiguration());
+        Table mainTable = hbaseConn.getTable(mainTables[0]);
         assertTrue(ensureNumberOfRows(mainTable, 2));
 
         /*
@@ -384,7 +382,8 @@ public class MutableIndexReplicationIT extends BaseTest {
         for (TableName tn : tables) {
             LOG.info("Table name: " + tn.getNameAsString());
         }
-        HTable remoteTable = new HTable(utility2.getConfiguration(), tables[0]);
+        org.apache.hadoop.hbase.client.Connection hbaseConn2 = ConnectionFactory.createConnection(utility2.getConfiguration());
+        Table remoteTable = hbaseConn2.getTable(tables[0]);
         for (int i = 0; i < REPLICATION_RETRIES; i++) {
             if (i >= REPLICATION_RETRIES - 1) {
                 fail("Waited too much time for put replication on table " + remoteTable
