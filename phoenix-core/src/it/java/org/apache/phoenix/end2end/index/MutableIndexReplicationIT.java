@@ -100,7 +100,7 @@ public class MutableIndexReplicationIT extends BaseTest {
 
     protected static HBaseTestingUtility utility1;
     protected static HBaseTestingUtility utility2;
-    protected static final int REPLICATION_RETRIES = 100;
+    protected static final int REPLICATION_RETRIES = 3;
 
     protected static final byte[] tableName = Bytes.toBytes("test");
     protected static final byte[] row = Bytes.toBytes("row");
@@ -364,7 +364,7 @@ public class MutableIndexReplicationIT extends BaseTest {
         assertFalse(rs.next());
         conn.close();
 
-        // make sure there are 2 rows in the HTable
+        // make sure there are 2 rows in the HTable (one for the data row, one for the index entry)
         TableName[] mainTables = admin.listTableNames(DATA_TABLE_FULL_NAME);
         TableName[] indexTables = admin.listTableNames(INDEX_TABLE_FULL_NAME);
         HTable mainTable = new HTable(utility1.getConfiguration(), mainTables[0]);
@@ -388,6 +388,7 @@ public class MutableIndexReplicationIT extends BaseTest {
                 fail("Waited too much time for put replication on table " + remoteTable
                         .getTableDescriptor().getNameAsString());
             }
+            // Should have replicated both rows in the HTable
             if (ensureNumberOfRows(remoteTable, 2)) {
                 break;
             }
