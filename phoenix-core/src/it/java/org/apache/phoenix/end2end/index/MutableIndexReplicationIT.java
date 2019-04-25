@@ -243,21 +243,23 @@ public class MutableIndexReplicationIT extends BaseTest {
         // lookup tables. For right now, we just go through an HTable
         LOG.info("Looking up tables in replication target");
         TableName[] tables = admin2.listTableNames();
-        org.apache.hadoop.hbase.client.Connection hbaseConn = ConnectionFactory.createConnection(utility2.getConfiguration());
-        Table remoteTable = hbaseConn.getTable(tables[0]);
-        for (int i = 0; i < REPLICATION_RETRIES; i++) {
-            if (i >= REPLICATION_RETRIES - 1) {
-                fail("Waited too much time for put replication on table " + remoteTable
-                        .getDescriptor().getTableName());
+        for (TableName tableName : tables) {
+            org.apache.hadoop.hbase.client.Connection hbaseConn = ConnectionFactory.createConnection(utility2.getConfiguration());
+            Table remoteTable = hbaseConn.getTable(tableName);
+            for (int i = 0; i < REPLICATION_RETRIES; i++) {
+                if (i >= REPLICATION_RETRIES - 1) {
+                    fail("Waited too much time for put replication on table " + remoteTable
+                            .getDescriptor().getTableName());
+                }
+                if (ensureAnyRows(remoteTable)) {
+                    break;
+                }
+                LOG.info("Sleeping for " + REPLICATION_WAIT_TIME_MILLIS
+                        + " for edits to get replicated");
+                Thread.sleep(REPLICATION_WAIT_TIME_MILLIS);
             }
-            if (ensureAnyRows(remoteTable)) {
-                break;
-            }
-            LOG.info("Sleeping for " + REPLICATION_WAIT_TIME_MILLIS
-                    + " for edits to get replicated");
-            Thread.sleep(REPLICATION_WAIT_TIME_MILLIS);
+            remoteTable.close();
         }
-        remoteTable.close();
     }
 
     private boolean ensureAnyRows(Table remoteTable) throws IOException {
