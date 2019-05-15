@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
+import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -75,10 +76,6 @@ public class MutableIndexReplicationIT extends BaseTest {
     private static final Log LOG = LogFactory.getLog(MutableIndexReplicationIT.class);
 
     public static final String SCHEMA_NAME = "";
-    public static final String DATA_TABLE_NAME = "T";
-    public static final String INDEX_TABLE_NAME = "I";
-    public static final String DATA_TABLE_FULL_NAME = SchemaUtil.getTableName(SCHEMA_NAME, "T");
-    public static final String INDEX_TABLE_FULL_NAME = SchemaUtil.getTableName(SCHEMA_NAME, "I");
     private static final long REPLICATION_WAIT_TIME_MILLIS = 10000;
 
     protected static PhoenixTestDriver driver;
@@ -94,10 +91,7 @@ public class MutableIndexReplicationIT extends BaseTest {
 
     protected static HBaseTestingUtility utility1;
     protected static HBaseTestingUtility utility2;
-    protected static final int REPLICATION_RETRIES = 3;
-
-    protected static final byte[] tableName = Bytes.toBytes("test");
-    protected static final byte[] row = Bytes.toBytes("row");
+    protected static final int REPLICATION_RETRIES = 100;
 
     @BeforeClass
     public static void setUpBeforeClass() throws Exception {
@@ -168,23 +162,28 @@ public class MutableIndexReplicationIT extends BaseTest {
 
     @Test
     public void testReplicationWithMutableIndexes() throws Exception {
+        String dataTableName = generateUniqueName();
+        String dataTableFullName = SchemaUtil.getTableName(SCHEMA_NAME, dataTableName);
+        String indexTableName = generateUniqueIndexName();
+        String indexTableFullName = SchemaUtil.getTableName(SCHEMA_NAME, indexTableName);
+
         Connection conn = getConnection();
 
         //create the primary and index tables
         conn.createStatement().execute(
-                "CREATE TABLE " + DATA_TABLE_FULL_NAME
+                "CREATE TABLE " + dataTableFullName
                         + " (k VARCHAR NOT NULL PRIMARY KEY, v1 VARCHAR, v2 VARCHAR)");
         conn.createStatement().execute(
-                "CREATE INDEX " + INDEX_TABLE_NAME + " ON " + DATA_TABLE_FULL_NAME
+                "CREATE INDEX " + indexTableName + " ON " + dataTableFullName
                         + " (v1)");
 
         // make sure that the tables are empty, but reachable
-        String query = "SELECT * FROM " + DATA_TABLE_FULL_NAME;
+        String query = "SELECT * FROM " + dataTableFullName;
         ResultSet rs = conn.createStatement().executeQuery(query);
         assertFalse(rs.next());
 
         //make sure there is no data in the table
-        query = "SELECT * FROM " + INDEX_TABLE_FULL_NAME;
+        query = "SELECT * FROM " + indexTableFullName;
         rs = conn.createStatement().executeQuery(query);
         assertFalse(rs.next());
 
@@ -193,8 +192,8 @@ public class MutableIndexReplicationIT extends BaseTest {
         HBaseAdmin admin2 = utility2.getHBaseAdmin();
 
         List<String> dataTables = new ArrayList<String>();
-        dataTables.add(DATA_TABLE_FULL_NAME);
-        dataTables.add(INDEX_TABLE_FULL_NAME);
+        dataTables.add(dataTableFullName);
+        dataTables.add(indexTableFullName);
         for (String tableName : dataTables) {
             HTableDescriptor desc = admin.getTableDescriptor(TableName.valueOf(tableName));
 
@@ -218,7 +217,7 @@ public class MutableIndexReplicationIT extends BaseTest {
 
         // load some data into the source cluster table
         PreparedStatement stmt =
-                conn.prepareStatement("UPSERT INTO " + DATA_TABLE_FULL_NAME + " VALUES(?,?,?)");
+                conn.prepareStatement("UPSERT INTO " + dataTableFullName + " VALUES(?,?,?)");
         stmt.setString(1, "a"); // k
         stmt.setString(2, "x"); // v1 <- has index
         stmt.setString(3, "1"); // v2
@@ -226,7 +225,7 @@ public class MutableIndexReplicationIT extends BaseTest {
         conn.commit();
 
         // make sure the index is working as expected
-        query = "SELECT * FROM " + INDEX_TABLE_FULL_NAME;
+        query = "SELECT * FROM " + indexTableFullName;
         rs = conn.createStatement().executeQuery(query);
         assertTrue(rs.next());
         assertEquals("x", rs.getString(1));
@@ -240,7 +239,7 @@ public class MutableIndexReplicationIT extends BaseTest {
         // other table can't be reached through Phoenix right now - would need to change how we
         // lookup tables. For right now, we just go through an HTable
         LOG.info("Looking up tables in replication target");
-        TableName[] tables = admin2.listTableNames();
+        TableName[] tables = (TableName[]) ArrayUtils.addAll(admin2.listTableNames(dataTableFullName), admin2.listTableNames(indexTableFullName));
         for (TableName tableName: tables) {
             LOG.info("checking rows in table: " + tableName);
             HTable remoteTable = new HTable(utility2.getConfiguration(), tableName);
@@ -293,23 +292,28 @@ public class MutableIndexReplicationIT extends BaseTest {
 
     @Test
     public void testReplicationWithMutableLocalIndexes() throws Exception {
+        String dataTableName = generateUniqueName();
+        String dataTableFullName = SchemaUtil.getTableName(SCHEMA_NAME, dataTableName);
+        String indexTableName = generateUniqueIndexName();
+        String indexTableFullName = SchemaUtil.getTableName(SCHEMA_NAME, indexTableName);
+
         Connection conn = getConnection();
 
         //create the primary and index tables
         conn.createStatement().execute(
-                "CREATE TABLE " + DATA_TABLE_FULL_NAME
+                "CREATE TABLE " + dataTableFullName
                         + " (k VARCHAR NOT NULL PRIMARY KEY, v1 VARCHAR, v2 VARCHAR)");
         conn.createStatement().execute(
-                "CREATE LOCAL INDEX " + INDEX_TABLE_NAME + " ON " + DATA_TABLE_FULL_NAME
+                "CREATE LOCAL INDEX " + indexTableName + " ON " + dataTableFullName
                         + " (v1)");
 
         // make sure that the tables are empty, but reachable
-        String query = "SELECT * FROM " + DATA_TABLE_FULL_NAME;
+        String query = "SELECT * FROM " + dataTableFullName;
         ResultSet rs = conn.createStatement().executeQuery(query);
         assertFalse(rs.next());
 
         //make sure there is no data in the table
-        query = "SELECT * FROM " + INDEX_TABLE_FULL_NAME;
+        query = "SELECT * FROM " + indexTableFullName;
         rs = conn.createStatement().executeQuery(query);
         assertFalse(rs.next());
 
@@ -318,9 +322,7 @@ public class MutableIndexReplicationIT extends BaseTest {
         HBaseAdmin admin2 = utility2.getHBaseAdmin();
 
         List<String> dataTables = new ArrayList<String>();
-        dataTables.add(DATA_TABLE_FULL_NAME);
-        // There is no separate index table
-        //dataTables.add(INDEX_TABLE_FULL_NAME);
+        dataTables.add(dataTableFullName);
         for (String tableName : dataTables) {
             HTableDescriptor desc = admin.getTableDescriptor(TableName.valueOf(tableName));
 
@@ -349,7 +351,7 @@ public class MutableIndexReplicationIT extends BaseTest {
 
         // load some data into the source cluster table
         PreparedStatement stmt =
-                conn.prepareStatement("UPSERT INTO " + DATA_TABLE_FULL_NAME + " VALUES(?,?,?)");
+                conn.prepareStatement("UPSERT INTO " + dataTableFullName + " VALUES(?,?,?)");
         stmt.setString(1, "a"); // k
         stmt.setString(2, "x"); // v1 <- has index
         stmt.setString(3, "1"); // v2
@@ -357,7 +359,7 @@ public class MutableIndexReplicationIT extends BaseTest {
         conn.commit();
 
         // make sure the index is working as expected
-        query = "SELECT * FROM " + INDEX_TABLE_FULL_NAME;
+        query = "SELECT * FROM " + indexTableFullName;
         rs = conn.createStatement().executeQuery(query);
         assertTrue(rs.next());
         assertEquals("x", rs.getString(1));
@@ -365,7 +367,7 @@ public class MutableIndexReplicationIT extends BaseTest {
         conn.close();
 
         // make sure there are 2 rows in the HTable (one for the data row, one for the index entry)
-        TableName[] mainTables = admin.listTableNames(DATA_TABLE_FULL_NAME);
+        TableName[] mainTables = admin.listTableNames(dataTableFullName);
         HTable mainTable = new HTable(utility1.getConfiguration(), mainTables[0]);
         assertTrue(ensureNumberOfRows(mainTable, 2));
 
@@ -376,7 +378,7 @@ public class MutableIndexReplicationIT extends BaseTest {
         // other table can't be reached through Phoenix right now - would need to change how we
         // lookup tables. For right now, we just go through an HTable
         LOG.info("Looking up tables in replication target");
-        TableName[] tables = admin2.listTableNames();
+        TableName[] tables = admin2.listTableNames(dataTableFullName);
         LOG.info("Table name length: " + tables.length);
         for (TableName tn : tables) {
             LOG.info("Table name: " + tn.getNameAsString());
